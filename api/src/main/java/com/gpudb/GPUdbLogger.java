@@ -1,14 +1,19 @@
 package com.gpudb;
 
-import org.apache.log4j.Appender;
-import org.apache.log4j.BasicConfigurator;
-import org.apache.log4j.ConsoleAppender;
-import org.apache.log4j.Level;
-import org.apache.log4j.Logger;
-import org.apache.log4j.PatternLayout;
-import java.util.Enumeration;
+import java.util.Map;
 
-
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.core.Appender;
+import org.apache.logging.log4j.core.appender.ConsoleAppender;
+import org.apache.logging.log4j.core.config.Configurator;
+import org.apache.logging.log4j.core.config.builder.api.AppenderComponentBuilder;
+import org.apache.logging.log4j.core.config.builder.api.ConfigurationBuilder;
+import org.apache.logging.log4j.core.config.builder.api.ConfigurationBuilderFactory;
+import org.apache.logging.log4j.core.config.builder.api.LayoutComponentBuilder;
+import org.apache.logging.log4j.core.config.builder.impl.BuiltConfiguration;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 
 public class GPUdbLogger {
 
@@ -24,7 +29,7 @@ public class GPUdbLogger {
 
 
     // Actual logger used for the API
-    private static Logger LOG = Logger.getLogger( API_LOGGER_NAME );
+    private static Logger LOG = LogManager.getLogger( API_LOGGER_NAME );
 
 
     /**
@@ -44,36 +49,41 @@ public class GPUdbLogger {
      * * If the given log level is different from the default, set it explicitly.
      */
     public static void initializeLogger( Level loggingLevel ) {
-        Logger rootLogger = Logger.getRootLogger();
+        Logger rootLogger = LogManager.getRootLogger();
 
         // Check for appenders--if none found, then that means the
         // end-user application has not supplied any logging properties
         // (which indicates that they probably don't expect any logging).
-        Enumeration<Appender> appenders = rootLogger.getAllAppenders();
-        boolean isLoggerConfiguredByUser = appenders.hasMoreElements();
+        Map<String, Appender> appenders = ((org.apache.logging.log4j.core.Logger)rootLogger).getAppenders();
+        boolean isLoggerConfiguredByUser = !appenders.isEmpty();
 
         if ( !isLoggerConfiguredByUser ) {
             // No appender is found; suppress log4j warnings by explicitly
             // getting the logger for the API
-            LOG = Logger.getLogger( API_LOGGER_NAME );
+            LOG = LogManager.getLogger( API_LOGGER_NAME );
 
-            // Configuring log4j helps towards suppressing the annoying log4j
-            // warnings
-            PatternLayout layout = new PatternLayout( "%d{yyyy-MM-dd HH:mm:ss} %-5p  %m%n" );
-            ConsoleAppender consoleAppender = new ConsoleAppender();
-            consoleAppender.setLayout( layout );
-            consoleAppender.activateOptions();
-            BasicConfigurator.configure( consoleAppender );
+            ConfigurationBuilder<BuiltConfiguration> builder =
+                    ConfigurationBuilderFactory.newConfigurationBuilder();
+            
+            LayoutComponentBuilder patternLayout = builder
+                    .newLayout(PatternLayout.class.getSimpleName())
+                    .addAttribute("pattern", "%d{yyyy-MM-dd HH:mm:ss} %-5p  %m%n");
+            
+            AppenderComponentBuilder consoleAppender = builder
+                    .newAppender("stdout", "Console")
+                    .add(patternLayout);
+            
+            Configurator.initialize(builder.add(consoleAppender).build());
 
             // Set the API's log level
-            LOG.setLevel( loggingLevel );
+            LOG.atLevel( loggingLevel );
 
             // Set the Apache HTTPClient log leve as well
-            Logger.getLogger( "org.apache.http" ).setLevel( loggingLevel );
+            LogManager.getLogger( DEP_LIB_APACHE_CLIENT_LOGGER ).atLevel( loggingLevel );
         } else {
             // If the log level is different from the default, set it explicitly
             if ( !loggingLevel.equals( DEFAULT_LOGGING_LEVEL ) ) {
-                LOG.setLevel( loggingLevel );
+                LOG.atLevel( loggingLevel );
                 LOG.warn( "Log properties set, but the log level is also "
                           + "programmatically set by the user ('"
                           + loggingLevel.toString()
@@ -85,19 +95,12 @@ public class GPUdbLogger {
             // API uses have log levels defined in the properties.  If not, we
             // will turn them off (at least the obnoxious ones).  For that, first
             // look for such loggers in the user given properties.
-            boolean isApacheHttpClientLoggerFound = false;
-            Enumeration<Logger> loggers = rootLogger.getHierarchy().getCurrentLoggers();
-            while ( loggers.hasMoreElements() ) {
-                if ( loggers.nextElement()
-                     .getName()
-                     .equalsIgnoreCase( DEP_LIB_APACHE_CLIENT_LOGGER ) ) {
-                    isApacheHttpClientLoggerFound = true;
-                }
-            }
+            boolean isApacheHttpClientLoggerFound =
+                LogManager.getContext().hasLogger(DEP_LIB_APACHE_CLIENT_LOGGER);
 
             // Mute the obnoxious logs if not set by the user
             if ( !isApacheHttpClientLoggerFound ) {
-                Logger.getLogger( DEP_LIB_APACHE_CLIENT_LOGGER ).setLevel( Level.OFF );
+                LogManager.getLogger( DEP_LIB_APACHE_CLIENT_LOGGER ).atLevel( Level.OFF );
             }
         }
     }   // end initializeLogger
@@ -134,9 +137,9 @@ public class GPUdbLogger {
      * Print extra information with the debug message.
      */
     public static void debug_with_info(String message) {
-        if ( ( LOG.getEffectiveLevel() == Level.DEBUG )
-             || ( LOG.getEffectiveLevel() == Level.TRACE )
-             || ( LOG.getEffectiveLevel() == Level.ALL ) ) {
+        if ( ( LOG.getLevel() == Level.DEBUG )
+             || ( LOG.getLevel() == Level.TRACE )
+             || ( LOG.getLevel() == Level.ALL ) ) {
             // Getting the line number is expensive, so only do this
             // if the appropriate log level is chosen
             StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
@@ -164,8 +167,8 @@ public class GPUdbLogger {
      * Print extra information with the trace message.
      */
     public static void trace_with_info(String message) {
-        if ( ( LOG.getEffectiveLevel() == Level.TRACE )
-             || ( LOG.getEffectiveLevel() == Level.ALL ) ) {
+        if ( ( LOG.getLevel() == Level.TRACE )
+             || ( LOG.getLevel() == Level.ALL ) ) {
             // Getting the line number is expensive, so only do this
             // if the appropriate log level is chosen
             StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
